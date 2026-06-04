@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import LoginPage from './pages/LoginPage';
-import LobbyPage from './pages/LobbyPage';
+import Login from './pages/Login';
+import Lobby from './pages/Lobby';
 
 function App() {
   const token = localStorage.getItem('token');
@@ -9,8 +9,8 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Navigate to="/login" />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/lobby" element={<LobbyPage />} />
+        <Route path="/login" element={<Login/>} />
+        <Route path="/lobby" element={<Lobby/>} />
       </Routes>
     </BrowserRouter>
   );

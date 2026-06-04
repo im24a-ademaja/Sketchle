@@ -4,7 +4,7 @@ import socket from '../socket/socket';
 
 const BASE_URL = 'http://localhost:4000';
 
-export default function LobbyPage() {
+export default function Lobby() {
   const [lobbyCode, setLobbyCode] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [players, setPlayers] = useState([]);
@@ -79,3 +79,5 @@ export default function LobbyPage() {
     </div>
   );
 }
+
+export default Lobby;

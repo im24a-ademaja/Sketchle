@@ -2,7 +2,7 @@ import {useState} from 'react';
 import {useNavigate} from 'react-router-dom';
 import {login, register} from '../api/auth';
 
-function LoginPage() {
+function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -12,9 +12,9 @@ function LoginPage() {
     setError('');
     const fn = action === 'login' ? login : register;
     const result = await fn(username, password);
-    if (data.error) return setError(data.error);
+    if (result.error) return setError(result.error);
     localStorage.setItem('token', result.token);
-    localStorage.setItem('username', data.user.username);
+    localStorage.setItem('username', result.user.username);
     navigate('/lobby');
   }
 
