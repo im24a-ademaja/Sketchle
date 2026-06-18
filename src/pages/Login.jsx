@@ -22,10 +22,12 @@ function Login() {
     <div style={{ maxWidth: 400, margin: '100px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
       <h1>Sketchle</h1>
       <input placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} />
-      <input placeholder="Passwort" type="password" value={password} onChange={e => setPassword(e.target.value)} />
+      <input placeholder="Password" type="password" value={password} onChange={e => setPassword(e.target.value)} />
       {error && <p style={{ color: 'red' }}>{error}</p>}
       <button onClick={() => handleSubmit('login')}>Login</button>
-      <button onClick={() => handleSubmit('register')}>Registrieren</button>
+      <button onClick={() => handleSubmit('register')}>Register</button>
     </div>
   );
 }  
+
+export default Login;
