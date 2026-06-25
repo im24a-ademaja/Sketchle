@@ -9,6 +9,7 @@ const OpenAI = require('openai');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
+console.log('OPENAI KEY geladen:', !!process.env.OPENAI_API_KEY);
 
 const app = express();
 const server = http.createServer(app);
@@ -20,6 +21,8 @@ const io = new Server(server, {
 
 const port = process.env.PORT || 4000;
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
+const MAX_ROUNDS = 3;
+const ROUND_DURATION = 45000;
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || undefined,
@@ -195,6 +198,21 @@ app.post('/api/drawings', authMiddleware, async (req, res) => {
       [roundId, req.user.id, imageData, score, feedback]
     );
 
+    const lobbyResult = await pool.query(
+      `SELECT l.code
+       FROM rounds r
+       JOIN lobbies l ON l.id = r.lobby_id
+       WHERE r.id = $1`,
+      [roundId]
+    );
+
+    if (lobbyResult.rows[0]?.code) {
+      io.to(lobbyResult.rows[0].code).emit('player-submitted', {
+        username: req.user.username,
+        roundId,
+      });
+    }
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Drawing submission error:', err);
@@ -247,6 +265,87 @@ app.post('/api/submissions', authMiddleware, async (req, res) => {
   }
 });
 
+async function getOverallResults(lobbyId) {
+  const result = await pool.query(
+    `SELECT u.username, COALESCE(SUM(d.ai_score), 0) AS total_score
+     FROM drawings d
+     JOIN rounds r ON r.id = d.round_id
+     JOIN users u ON u.id = d.user_id
+     WHERE r.lobby_id = $1
+     GROUP BY u.id, u.username
+     ORDER BY total_score DESC, u.username ASC`,
+    [lobbyId]
+  );
+
+  return result.rows;
+}
+
+async function startRoundForLobby(lobbyCode) {
+  try {
+    const lobbyResult = await pool.query('SELECT * FROM lobbies WHERE code = $1', [lobbyCode]);
+    const lobby = lobbyResult.rows[0];
+    if (!lobby) return;
+
+    const nextRoundNumber = lobby.current_round + 1;
+    if (nextRoundNumber > MAX_ROUNDS) {
+      const results = await getOverallResults(lobby.id);
+      io.to(lobbyCode).emit('game-finished', { results });
+      return;
+    }
+
+    const word = WORDS[Math.floor(Math.random() * WORDS.length)];
+
+    const roundResult = await pool.query(
+      'INSERT INTO rounds (lobby_id, round_number, word, started_at) VALUES ($1, $2, $3, NOW()) RETURNING *',
+      [lobby.id, nextRoundNumber, word]
+    );
+    const round = roundResult.rows[0];
+
+    await pool.query('UPDATE lobbies SET current_round = $1 WHERE id = $2', [nextRoundNumber, lobby.id]);
+
+    const startTime = Date.now();
+
+    io.to(lobbyCode).emit('round-started', {
+      word,
+      startTime,
+      duration: ROUND_DURATION,
+      roundId: round.id,
+      roundNumber: nextRoundNumber,
+      totalRounds: MAX_ROUNDS,
+    });
+
+    setTimeout(async () => {
+      try {
+        const result = await pool.query(
+          `SELECT d.*, u.username
+           FROM drawings d
+           LEFT JOIN users u ON u.id = d.user_id
+           WHERE d.round_id = $1
+           ORDER BY d.ai_score DESC, d.submitted_at ASC`,
+          [round.id]
+        );
+
+        io.to(lobbyCode).emit('round-results', { roundId: round.id, results: result.rows });
+      } catch (err) {
+        console.error('round-results error:', err);
+      }
+
+      io.to(lobbyCode).emit('round-ended', { roundId: round.id });
+
+      if (nextRoundNumber < MAX_ROUNDS) {
+        setTimeout(() => {
+          startRoundForLobby(lobbyCode);
+        }, 3000);
+      } else {
+        const results = await getOverallResults(lobby.id);
+        io.to(lobbyCode).emit('game-finished', { results });
+      }
+    }, ROUND_DURATION);
+  } catch (err) {
+    console.error('start-round error:', err);
+  }
+}
+
 // Socket.io
 io.on('connection', (socket) => {
   console.log('Socket connected:', socket.id);
@@ -269,37 +368,11 @@ io.on('connection', (socket) => {
 
 const WORDS = ['Cat', 'House', 'Sun', 'Tree', 'Car', 'Fish', 'Mountain', 'Book', 'Phone', 'Flower'];
 
-socket.on('start-round', async () => {
+socket.on('start-round', () => {
   const { lobbyCode } = socket.data;
   if (!lobbyCode) return;
 
-  try {
-    const lobbyResult = await pool.query('SELECT * FROM lobbies WHERE code = $1', [lobbyCode]);
-    const lobby = lobbyResult.rows[0];
-    if (!lobby) return;
-
-    const word = WORDS[Math.floor(Math.random() * WORDS.length)];
-    const roundNumber = lobby.current_round + 1;
-
-    const roundResult = await pool.query(
-      'INSERT INTO rounds (lobby_id, round_number, word, started_at) VALUES ($1, $2, $3, NOW()) RETURNING *',
-      [lobby.id, roundNumber, word]
-    );
-    const round = roundResult.rows[0];
-
-    await pool.query('UPDATE lobbies SET current_round = $1 WHERE id = $2', [roundNumber, lobby.id]);
-
-    const startTime = Date.now();
-    const duration = 45000;
-
-    io.to(lobbyCode).emit('round-started', { word, startTime, duration, roundId: round.id });
-
-    setTimeout(() => {
-      io.to(lobbyCode).emit('round-ended', { roundId: round.id });
-    }, duration);
-  } catch (err) {
-    console.error('start-round error:', err);
-  }
+  startRoundForLobby(lobbyCode);
 });
 
   socket.on('disconnect', () => {
