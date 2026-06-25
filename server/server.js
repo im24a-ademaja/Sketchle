@@ -177,7 +177,7 @@ app.post('/api/drawings', authMiddleware, async (req, res) => {
         content: [
           {
             type: 'text',
-            text: `Das Stichwort ist "${round.word}". Bewerte wie gut die Zeichnung das Stichwort darstellt, 0-100 Punkte. Antworte NUR mit JSON: {"score": <Zahl>, "feedback": "<kurzer Kommentar>"}`
+            text: `The keyword is "${round.word}". Rate how well the drawing represents the keyword on a scale from 0-100 points. Reply ONLY with JSON: {"score": <number>, "feedback": "<short comment>"}`
           },
           { type: 'image_url', image_url: { url: imageData } }
         ]

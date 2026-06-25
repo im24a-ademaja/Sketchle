@@ -20,6 +20,7 @@ export default function Lobby() {
   const [totalRounds, setTotalRounds] = useState(3);
   const [gameFinished, setGameFinished] = useState(false);
   const [gameResults, setGameResults] = useState([]);
+  const [userDrawings, setUserDrawings] = useState([]);
   const canvasRef = useRef(null);
   const roundIdRef = useRef(null);
   const tokenRef = useRef(null);
@@ -84,6 +85,7 @@ export default function Lobby() {
       setGameResults(results);
       setRoundActive(false);
       setTimeLeft(0);
+      setUserDrawings([]);
     });
 
     socket.on('round-ended', () => {
@@ -214,6 +216,38 @@ export default function Lobby() {
               <div>Total Score: {entry.total_score ?? 0}</div>
             </div>
           ))}
+
+          <div style={{ marginTop: 16 }}>
+            <h3>Your Drawings</h3>
+            {userDrawings.length > 0 ? (
+              userDrawings.map((entry, index) => (
+                <div key={`${entry.id}-${index}`} style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10, marginBottom: 10 }}>
+                  <div>Round {index + 1}</div>
+                  <div>Score: {entry.ai_score ?? 0}/100</div>
+                  <div>Feedback: {entry.ai_feedback || 'No feedback'}</div>
+                  {entry.image_data ? <img src={entry.image_data} alt="drawing" style={{ width: '100%', marginTop: 8, borderRadius: 6 }} /> : null}
+                </div>
+              ))
+            ) : (
+              <p>No drawings captured for this player yet.</p>
+            )}
+          </div>
+
+          <button
+            onClick={() => {
+              setGameFinished(false);
+              setGameResults([]);
+              setUserDrawings([]);
+              setRoundResults([]);
+              setRoundActive(false);
+              setTimeLeft(0);
+              setWord('');
+              setRoundId(null);
+            }}
+            style={{ marginTop: 12 }}
+          >
+            Back to Lobby
+          </button>
         </div>
       )}
 
