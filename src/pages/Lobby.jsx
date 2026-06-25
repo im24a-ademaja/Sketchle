@@ -175,7 +175,7 @@ export default function Lobby() {
           <li key={player}>
             {player}
             <span style={{ marginLeft: 8, color: submissionStatus[player] ? 'green' : '#b36b00' }}>
-              {submissionStatus[player] ? '✅ abgegeben' : '⏳ offen'}
+              {submissionStatus[player] ? 'submitted' : 'pending'}
             </span>
           </li>
         ))}

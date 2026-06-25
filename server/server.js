@@ -31,6 +31,7 @@ const pool = new Pool({
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const uploadsDir = path.resolve(__dirname, 'uploads');
+const WORDS = ['Cat', 'House', 'Sun', 'Tree', 'Car', 'Fish', 'Mountain', 'Book', 'Phone', 'Flower'];
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -365,8 +366,6 @@ io.on('connection', (socket) => {
       io.to(lobbyCode).emit('player-left', { username });
     }
   });
-
-const WORDS = ['Cat', 'House', 'Sun', 'Tree', 'Car', 'Fish', 'Mountain', 'Book', 'Phone', 'Flower'];
 
 socket.on('start-round', () => {
   const { lobbyCode } = socket.data;
