@@ -46,7 +46,7 @@ const DrawingCanvas = forwardRef(function DrawingCanvas({ onSubmit, disabled = f
       <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
         <button onClick={undoCanvas} disabled={disabled}>Undo</button>
         <button onClick={clearCanvas} disabled={disabled}>Clear</button>
-        <button onClick={submitCanvas} disabled={disabled}>Abgeben</button>
+        <button onClick={submitCanvas} disabled={disabled}>Submit</button>
       </div>
     </div>
   );

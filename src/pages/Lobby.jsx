@@ -13,6 +13,7 @@ export default function Lobby() {
   const [word, setWord] = useState('');
   const [timeLeft, setTimeLeft] = useState(0);
   const [roundActive, setRoundActive] = useState(false);
+  const [roundId, setRoundId] = useState(null);
   const canvasRef = useRef(null);
   const navigate = useNavigate();
 
@@ -30,8 +31,9 @@ export default function Lobby() {
       setPlayers(prev => prev.filter(p => p !== username));
     });
 
-    socket.on('round-started', ({ word, startTime, duration }) => {
+    socket.on('round-started', ({ word, startTime, duration, roundId }) => {
       setWord(word);
+      setRoundId(roundId);
       setRoundActive(true);
       setTimeLeft(Math.max(0, Math.ceil((startTime + duration - Date.now()) / 1000)));
     });
@@ -39,7 +41,7 @@ export default function Lobby() {
     socket.on('round-ended', () => {
       const image = canvasRef.current?.getImageData();
       if (image) {
-        console.log('Auto-abgegeben:', image.slice(0, 50));
+        submitDrawing(image);
       }
       setRoundActive(false);
       setTimeLeft(0);
@@ -88,6 +90,25 @@ export default function Lobby() {
     setInLobby(true);
   }
 
+  async function submitDrawing(dataUrl) {
+    if (!dataUrl || !roundId) return;
+
+    try {
+      const res = await fetch(`${BASE_URL}/api/drawings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ roundId, imageData: dataUrl }),
+      });
+      const data = await res.json();
+      console.log('Bewertung:', data.ai_score, data.ai_feedback);
+    } catch (error) {
+      console.error('Submit fehlgeschlagen:', error);
+    }
+  }
+
   function logout() {
     localStorage.clear();
     navigate('/');
@@ -101,11 +122,11 @@ export default function Lobby() {
 
       <div style={{ marginTop: 16 }}>
         {!roundActive ? (
-          <button onClick={() => socket.emit('start-round')}>Runde starten</button>
+          <button onClick={() => socket.emit('start-round')}>Start Round</button>
         ) : (
           <div>
-            <p><strong>Wort:</strong> {word}</p>
-            <p><strong>Verbleibend:</strong> {timeLeft}s</p>
+            <p><strong>Word:</strong> {word}</p>
+            <p><strong>Time left:</strong> {timeLeft}s</p>
           </div>
         )}
       </div>
@@ -114,11 +135,11 @@ export default function Lobby() {
         {roundActive ? (
           <DrawingCanvas
             ref={canvasRef}
-            onSubmit={(dataUrl) => console.log('Manuell:', dataUrl.slice(0, 50))}
+            onSubmit={submitDrawing}
             disabled={!roundActive}
           />
         ) : (
-          <p>Zeit abgelaufen</p>
+          <p>Time is up</p>
         )}
       </div>
     </div>

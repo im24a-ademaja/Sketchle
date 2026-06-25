@@ -27,9 +27,12 @@ const pool = new Pool({
 });
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const uploadsDir = path.resolve(__dirname, 'uploads');
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+fs.mkdirSync(uploadsDir, { recursive: true });
+app.use('/uploads', express.static(uploadsDir));
 
 // Health
 app.get('/api/health', (req, res) => {
@@ -154,6 +157,96 @@ app.post('/api/vision', async (req, res) => {
   }
 });
 
+app.post('/api/drawings', authMiddleware, async (req, res) => {
+  const { roundId, imageData } = req.body;
+  if (!roundId || !imageData) return res.status(400).json({ error: 'roundId und imageData erforderlich' });
+
+  try {
+    const roundResult = await pool.query('SELECT * FROM rounds WHERE id = $1', [roundId]);
+    const round = roundResult.rows[0];
+    if (!round) return res.status(404).json({ error: 'Runde nicht gefunden' });
+
+    const aiResponse = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: `Das Stichwort ist "${round.word}". Bewerte wie gut die Zeichnung das Stichwort darstellt, 0-100 Punkte. Antworte NUR mit JSON: {"score": <Zahl>, "feedback": "<kurzer Kommentar>"}`
+          },
+          { type: 'image_url', image_url: { url: imageData } }
+        ]
+      }]
+    });
+
+    let score = 0;
+    let feedback = '';
+    try {
+      const parsed = JSON.parse(aiResponse.choices[0].message.content.replace(/```json|```/g, '').trim());
+      score = parsed.score;
+      feedback = parsed.feedback;
+    } catch {
+      feedback = aiResponse.choices[0].message.content;
+    }
+
+    const result = await pool.query(
+      'INSERT INTO drawings (round_id, user_id, image_data, ai_score, ai_feedback) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [roundId, req.user.id, imageData, score, feedback]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Drawing submission error:', err);
+    res.status(500).json({ error: 'Bewertung fehlgeschlagen' });
+  }
+});
+
+app.post('/api/submissions', authMiddleware, async (req, res) => {
+  try {
+    const { imageData, prompt, lobbyCode } = req.body;
+    if (!imageData) {
+      return res.status(400).json({ error: 'imageData is required' });
+    }
+
+    const match = imageData.match(/^data:(image\/\w+);base64,(.+)$/);
+    if (!match) {
+      return res.status(400).json({ error: 'Invalid image format' });
+    }
+
+    const [, imageType, base64Data] = match;
+    const extension = imageType.split('/')[1] || 'png';
+    const buffer = Buffer.from(base64Data, 'base64');
+    const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`;
+    const filePath = path.join(uploadsDir, fileName);
+    fs.writeFileSync(filePath, buffer);
+
+    const imageUrl = `http://localhost:${port}/uploads/${fileName}`;
+    const finalPrompt = prompt || 'Describe the content of this image.';
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: finalPrompt },
+          { type: 'image_url', image_url: { url: imageUrl } }
+        ]
+      }]
+    });
+
+    res.json({
+      savedFile: fileName,
+      imageUrl,
+      lobbyCode,
+      output: response.choices[0].message.content,
+    });
+  } catch (error) {
+    console.error('Submission error:', error);
+    res.status(500).json({ error: 'Could not process submission', details: error.message });
+  }
+});
+
 // Socket.io
 io.on('connection', (socket) => {
   console.log('Socket connected:', socket.id);
@@ -176,18 +269,37 @@ io.on('connection', (socket) => {
 
 const WORDS = ['Cat', 'House', 'Sun', 'Tree', 'Car', 'Fish', 'Mountain', 'Book', 'Phone', 'Flower'];
 
-socket.on('start-round', () => {
+socket.on('start-round', async () => {
   const { lobbyCode } = socket.data;
   if (!lobbyCode) return;
 
-  const word = WORDS[Math.floor(Math.random() * WORDS.length)];
-  const startTime = Date.now();
-  const duration = 45000;
-  io.to(lobbyCode).emit('round-started', { word, startTime, duration });
+  try {
+    const lobbyResult = await pool.query('SELECT * FROM lobbies WHERE code = $1', [lobbyCode]);
+    const lobby = lobbyResult.rows[0];
+    if (!lobby) return;
 
-  setTimeout(() => {
-    io.to(lobbyCode).emit('round-ended');
-  }, duration);
+    const word = WORDS[Math.floor(Math.random() * WORDS.length)];
+    const roundNumber = lobby.current_round + 1;
+
+    const roundResult = await pool.query(
+      'INSERT INTO rounds (lobby_id, round_number, word, started_at) VALUES ($1, $2, $3, NOW()) RETURNING *',
+      [lobby.id, roundNumber, word]
+    );
+    const round = roundResult.rows[0];
+
+    await pool.query('UPDATE lobbies SET current_round = $1 WHERE id = $2', [roundNumber, lobby.id]);
+
+    const startTime = Date.now();
+    const duration = 45000;
+
+    io.to(lobbyCode).emit('round-started', { word, startTime, duration, roundId: round.id });
+
+    setTimeout(() => {
+      io.to(lobbyCode).emit('round-ended', { roundId: round.id });
+    }, duration);
+  } catch (err) {
+    console.error('start-round error:', err);
+  }
 });
 
   socket.on('disconnect', () => {
