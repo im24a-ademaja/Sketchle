@@ -1,19 +1,17 @@
-const BASE_URL = 'http://localhost:4000';
+import { apiFetch } from './client';
 
 export async function register(username, password) {
-  const response = await fetch(`${BASE_URL}/api/auth/register`, {
+  return apiFetch('/api/auth/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
   });
-  return response.json();
 }
 
 export async function login(username, password) {
-    const response = await fetch(`${BASE_URL}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-    });
-    return response.json();
+  return apiFetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
 }

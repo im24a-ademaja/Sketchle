@@ -3,14 +3,15 @@ import Login from './pages/Login';
 import Lobby from './pages/Lobby';
 
 function App() {
-  const token = localStorage.getItem('token');
+  const isAuthenticated = Boolean(localStorage.getItem('token'));
 
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Navigate to="/login" />} />
-        <Route path="/login" element={<Login/>} />
-        <Route path="/lobby" element={<Lobby/>} />
+        <Route path="/" element={<Navigate to={isAuthenticated ? '/lobby' : '/login'} replace />} />
+        <Route path="/login" element={isAuthenticated ? <Navigate to="/lobby" replace /> : <Login />} />
+        <Route path="/lobby" element={isAuthenticated ? <Lobby /> : <Navigate to="/login" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   );

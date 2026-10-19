@@ -1,282 +1,417 @@
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { apiFetch } from '../api/client';
 import socket from '../socket/socket';
 import DrawingCanvas from '../components/DrawingCanvas';
 
-const BASE_URL = 'http://localhost:4000';
+const MIN_PLAYERS = 1;
+const MAX_PLAYERS = 10;
 
 export default function Lobby() {
-  const [lobbyCode, setLobbyCode] = useState('');
   const [joinCode, setJoinCode] = useState('');
+  const [lobbyCode, setLobbyCode] = useState('');
   const [players, setPlayers] = useState([]);
+  const [hostUsername, setHostUsername] = useState('');
+  const [lobbyStatus, setLobbyStatus] = useState('waiting');
   const [inLobby, setInLobby] = useState(false);
   const [word, setWord] = useState('');
   const [timeLeft, setTimeLeft] = useState(0);
+  const [roundEndsAt, setRoundEndsAt] = useState(null);
   const [roundActive, setRoundActive] = useState(false);
   const [roundId, setRoundId] = useState(null);
-  const [roundResults, setRoundResults] = useState([]);
-  const [submissionStatus, setSubmissionStatus] = useState({});
   const [currentRound, setCurrentRound] = useState(0);
-  const [totalRounds, setTotalRounds] = useState(3);
+  const [roundResults, setRoundResults] = useState([]);
+  const [roundResultsReceived, setRoundResultsReceived] = useState(false);
+  const [submissionStatus, setSubmissionStatus] = useState({});
+  const [hasSubmitted, setHasSubmitted] = useState(false);
   const [gameFinished, setGameFinished] = useState(false);
   const [gameResults, setGameResults] = useState([]);
-  const [userDrawings, setUserDrawings] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
   const canvasRef = useRef(null);
   const roundIdRef = useRef(null);
-  const tokenRef = useRef(null);
+  const hasSubmittedRef = useRef(false);
+  const submitDrawingRef = useRef(null);
   const navigate = useNavigate();
-
+  const username = localStorage.getItem('username') || '';
   const token = localStorage.getItem('token');
-  const username = localStorage.getItem('username');
+  const isHost = username === hostUsername;
+
+  const submitDrawing = useCallback(async (imageData) => {
+    const activeRoundId = roundIdRef.current;
+    if (!imageData || !activeRoundId || hasSubmittedRef.current) return;
+
+    hasSubmittedRef.current = true;
+    setHasSubmitted(true);
+    setError('');
+    try {
+      const options = {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roundId: activeRoundId, imageData }),
+      };
+      try {
+        await apiFetch('/api/drawings', options);
+      } catch (requestError) {
+        if (requestError.status) throw requestError;
+        await new Promise(resolve => setTimeout(resolve, 350));
+        await apiFetch('/api/drawings', options);
+      }
+    } catch (submitError) {
+      if (submitError.status === 502 || submitError.status === 409) {
+        setHasSubmitted(true);
+      } else {
+        hasSubmittedRef.current = false;
+        setHasSubmitted(false);
+      }
+      setError(submitError.message || 'Zeichnung konnte nicht abgegeben werden.');
+    }
+  }, []);
+  submitDrawingRef.current = submitDrawing;
 
   useEffect(() => {
-    roundIdRef.current = roundId;
-  }, [roundId]);
+    if (!token) {
+      navigate('/login', { replace: true });
+      return undefined;
+    }
 
-  useEffect(() => {
-    tokenRef.current = token;
-  }, [token]);
+    socket.auth = { token };
 
-  useEffect(() => {
-    socket.connect();
-
-    socket.on('player-joined', ({ username: joinedUsername }) => {
-      setPlayers(prev => [...new Set([...prev, joinedUsername])]);
-      setSubmissionStatus(prev => ({ ...prev, [joinedUsername]: false }));
-    });
-
-    socket.on('player-left', ({ username: leftUsername }) => {
-      setPlayers(prev => prev.filter(p => p !== leftUsername));
-      setSubmissionStatus(prev => {
-        const next = { ...prev };
-        delete next[leftUsername];
-        return next;
-      });
-    });
-
-    socket.on('player-submitted', ({ username: submittedUsername }) => {
-      setSubmissionStatus(prev => ({ ...prev, [submittedUsername]: true }));
-    });
-
-    socket.on('round-started', ({ word: newWord, startTime, duration, roundId: newRoundId, roundNumber, totalRounds: roundsTotal }) => {
-      setWord(newWord);
-      setRoundId(newRoundId);
-      setCurrentRound(roundNumber || 1);
-      setTotalRounds(roundsTotal || 3);
-      setGameFinished(false);
-      setRoundResults([]);
-      setSubmissionStatus(prev => {
+    const onLobbyState = (state) => {
+      setPlayers(state.players || []);
+      setHostUsername(state.hostUsername || '');
+      setLobbyStatus(state.status || 'waiting');
+      setSubmissionStatus(previous => {
         const next = {};
-        Object.keys(prev).forEach(player => {
-          next[player] = false;
+        (state.players || []).forEach(player => {
+          next[player] = previous[player] || false;
         });
         return next;
       });
-      setRoundActive(true);
+    };
+    const onPlayerSubmitted = ({ username: submittedUsername }) => {
+      if (submittedUsername) {
+        setSubmissionStatus(previous => ({ ...previous, [submittedUsername]: true }));
+      }
+    };
+    const onRoundStarted = ({ word: newWord, startTime, duration, roundId: newRoundId, roundNumber }) => {
+      roundIdRef.current = newRoundId;
+      hasSubmittedRef.current = false;
+      setRoundId(newRoundId);
+      setWord(newWord);
+      setCurrentRound(roundNumber);
+      setRoundEndsAt(startTime + duration);
       setTimeLeft(Math.max(0, Math.ceil((startTime + duration - Date.now()) / 1000)));
-    });
-
-    socket.on('round-results', ({ results = [] }) => {
+      setRoundActive(true);
+      setHasSubmitted(false);
+      setRoundResults([]);
+      setRoundResultsReceived(false);
+      setGameFinished(false);
+      setSubmissionStatus(previous => Object.fromEntries(
+        Object.keys(previous).map(player => [player, false])
+      ));
+    };
+    const onSubmitRequest = ({ roundId: requestedRoundId }) => {
+      if (Number(requestedRoundId) !== Number(roundIdRef.current)) return;
+      if (hasSubmittedRef.current) {
+        setRoundActive(false);
+        setRoundEndsAt(null);
+        return;
+      }
+      const imageData = canvasRef.current?.getImageData();
+      if (imageData) void submitDrawingRef.current(imageData);
+      setRoundActive(false);
+    };
+    const onRoundResults = ({ results = [], roundNumber }) => {
       setRoundResults(results);
-    });
-
-    socket.on('game-finished', ({ results = [] }) => {
+      if (roundNumber) setCurrentRound(roundNumber);
+      setRoundResultsReceived(true);
+      setRoundActive(false);
+      setRoundEndsAt(null);
+      setTimeLeft(0);
+    };
+    const onGameFinished = ({ results = [] }) => {
       setGameFinished(true);
       setGameResults(results);
       setRoundActive(false);
+      setRoundEndsAt(null);
       setTimeLeft(0);
-      setUserDrawings([]);
-    });
+      setLobbyStatus('completed');
+    };
+    const onLobbyError = ({ message }) => setError(message || 'Im Spiel ist ein Fehler aufgetreten.');
+    const onConnectError = (connectError) => setError(connectError.message || 'Die Verbindung zum Spielserver ist fehlgeschlagen.');
 
-    socket.on('round-ended', () => {
-      const image = canvasRef.current?.getImageData();
-      if (image) {
-        submitDrawing(image);
-      }
-      setRoundActive(false);
-      setTimeLeft(0);
-    });
+    socket.on('lobby-state', onLobbyState);
+    socket.on('player-submitted', onPlayerSubmitted);
+    socket.on('round-started', onRoundStarted);
+    socket.on('round-submit-request', onSubmitRequest);
+    socket.on('round-results', onRoundResults);
+    socket.on('game-finished', onGameFinished);
+    socket.on('lobby-error', onLobbyError);
+    socket.on('connect_error', onConnectError);
+    socket.connect();
 
     return () => {
-      socket.off('player-joined');
-      socket.off('player-left');
-      socket.off('player-submitted');
-      socket.off('round-started');
-      socket.off('round-results');
-      socket.off('game-finished');
-      socket.off('round-ended');
+      socket.off('lobby-state', onLobbyState);
+      socket.off('player-submitted', onPlayerSubmitted);
+      socket.off('round-started', onRoundStarted);
+      socket.off('round-submit-request', onSubmitRequest);
+      socket.off('round-results', onRoundResults);
+      socket.off('game-finished', onGameFinished);
+      socket.off('lobby-error', onLobbyError);
+      socket.off('connect_error', onConnectError);
       socket.disconnect();
     };
-  }, []);
+  }, [navigate, token]);
 
   useEffect(() => {
-    if (!roundActive) return;
-
-    const interval = setInterval(() => {
-      setTimeLeft(prev => Math.max(0, prev - 1));
-    }, 1000);
-
+    if (!roundActive || !roundEndsAt) return undefined;
+    const updateTime = () => setTimeLeft(Math.max(0, Math.ceil((roundEndsAt - Date.now()) / 1000)));
+    updateTime();
+    const interval = setInterval(updateTime, 250);
     return () => clearInterval(interval);
-  }, [roundActive]);
+  }, [roundActive, roundEndsAt]);
+
+  useEffect(() => {
+    if (!roundActive || timeLeft !== 0 || hasSubmittedRef.current) return;
+    const imageData = canvasRef.current?.getImageData();
+    if (imageData) void submitDrawingRef.current(imageData);
+  }, [roundActive, timeLeft]);
+
+  async function joinSocketLobby(code) {
+    if (!socket.connected) {
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          socket.off('connect', onConnect);
+          socket.off('connect_error', onError);
+          reject(new Error('Zeitüberschreitung beim Verbinden mit dem Spielserver.'));
+        }, 10000);
+        const onConnect = () => {
+          clearTimeout(timeout);
+          socket.off('connect_error', onError);
+          resolve();
+        };
+        const onError = (connectError) => {
+          clearTimeout(timeout);
+          socket.off('connect', onConnect);
+          reject(connectError);
+        };
+        socket.once('connect', onConnect);
+        socket.once('connect_error', onError);
+        socket.connect();
+      });
+    }
+
+    await new Promise((resolve, reject) => {
+      socket.emit('join-lobby', { lobbyCode: code }, (result) => {
+        if (result?.error) reject(new Error(result.error));
+        else resolve();
+      });
+    });
+    setLobbyCode(code);
+    setInLobby(true);
+    setError('');
+  }
 
   async function createLobby() {
-    const res = await fetch(`${BASE_URL}/api/lobbies`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const data = await res.json();
-    setLobbyCode(data.code);
-    socket.emit('join-lobby', { lobbyCode: data.code, username });
-    setPlayers([username]);
-    setInLobby(true);
-  }
-
-  async function joinLobby() {
-    const res = await fetch(`${BASE_URL}/api/lobbies/${joinCode}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const data = await res.json();
-    if (data.error) return alert(data.error);
-    setLobbyCode(data.code);
-    socket.emit('join-lobby', { lobbyCode: data.code, username });
-    setPlayers([username]);
-    setInLobby(true);
-  }
-
-  async function submitDrawing(dataUrl) {
-    const currentRoundId = roundIdRef.current;
-    if (!dataUrl || !currentRoundId) return;
-
+    setIsLoading(true);
+    setError('');
     try {
-      const res = await fetch(`${BASE_URL}/api/drawings`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${tokenRef.current}`,
-        },
-        body: JSON.stringify({ roundId: currentRoundId, imageData: dataUrl }),
-      });
-      const data = await res.json();
-      console.log('Bewertung:', data.ai_score, data.ai_feedback);
-    } catch (error) {
-      console.error('Submit fehlgeschlagen:', error);
+      const lobby = await apiFetch('/api/lobbies', { method: 'POST' });
+      await joinSocketLobby(lobby.code);
+    } catch (requestError) {
+      setError(requestError.message || 'Der Spielraum konnte nicht erstellt werden.');
+    } finally {
+      setIsLoading(false);
     }
   }
 
-  function logout() {
-    localStorage.clear();
-    navigate('/');
+  async function joinLobby(event) {
+    event.preventDefault();
+    const code = joinCode.trim().toUpperCase();
+    if (!/^[A-Z0-9]{6}$/.test(code)) {
+      setError('Der Spielraum-Code muss genau 6 Zeichen haben.');
+      return;
+    }
+
+    setIsLoading(true);
+    setError('');
+    try {
+      await apiFetch(`/api/lobbies/${encodeURIComponent(code)}`);
+      await joinSocketLobby(code);
+    } catch (requestError) {
+      setError(requestError.message || 'Der Spielraum konnte nicht betreten werden.');
+    } finally {
+      setIsLoading(false);
+    }
   }
 
-  if (inLobby) return (
-    <div style={{ maxWidth: 480, margin: '100px auto' }}>
-      <h2>Lobby: {lobbyCode}</h2>
-      <p>Players:</p>
-      <ul>
-        {players.map(player => (
-          <li key={player}>
-            {player}
-            <span style={{ marginLeft: 8, color: submissionStatus[player] ? 'green' : '#b36b00' }}>
-              {submissionStatus[player] ? 'submitted' : 'pending'}
-            </span>
-          </li>
-        ))}
-      </ul>
+  function startRound() {
+    setError('');
+    socket.emit('start-round', result => {
+      if (result?.error) setError(result.error);
+    });
+  }
 
-      <div style={{ marginTop: 16 }}>
-        {!roundActive && !gameFinished ? (
-          <button onClick={() => socket.emit('start-round')}>Start Round</button>
-        ) : (
-          <div>
-            <p><strong>Word:</strong> {word}</p>
-            <p><strong>Time left:</strong> {timeLeft}s</p>
-            <p><strong>Round:</strong> {currentRound}/{totalRounds}</p>
-          </div>
-        )}
-      </div>
+  function leaveLobby() {
+    socket.emit('leave-lobby');
+    setInLobby(false);
+    setLobbyCode('');
+    setPlayers([]);
+    setHostUsername('');
+    setLobbyStatus('waiting');
+    setRoundResults([]);
+    setRoundResultsReceived(false);
+    setGameResults([]);
+    setGameFinished(false);
+    roundIdRef.current = null;
+    setRoundId(null);
+    setRoundActive(false);
+    setJoinCode('');
+    setError('');
+  }
 
-      <div style={{ marginTop: 16 }}>
-        {roundActive ? (
-          <DrawingCanvas
-            ref={canvasRef}
-            onSubmit={submitDrawing}
-            disabled={!roundActive}
-          />
-        ) : (
-          <p>Time is up</p>
-        )}
-      </div>
-
-      {gameFinished && gameResults.length > 0 && (
-        <div style={{ marginTop: 20 }}>
-          <h3>Overall Ranking</h3>
-          {gameResults.map((entry, index) => (
-            <div key={entry.username} style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10, marginBottom: 8 }}>
-              <strong>#{index + 1} {entry.username || 'Unknown'}</strong>
-              <div>Total Score: {entry.total_score ?? 0}</div>
-            </div>
-          ))}
-
-          <div style={{ marginTop: 16 }}>
-            <h3>Your Drawings</h3>
-            {userDrawings.length > 0 ? (
-              userDrawings.map((entry, index) => (
-                <div key={`${entry.id}-${index}`} style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10, marginBottom: 10 }}>
-                  <div>Round {index + 1}</div>
-                  <div>Score: {entry.ai_score ?? 0}/100</div>
-                  <div>Feedback: {entry.ai_feedback || 'No feedback'}</div>
-                  {entry.image_data ? <img src={entry.image_data} alt="drawing" style={{ width: '100%', marginTop: 8, borderRadius: 6 }} /> : null}
-                </div>
-              ))
-            ) : (
-              <p>No drawings captured for this player yet.</p>
-            )}
-          </div>
-
-          <button
-            onClick={() => {
-              setGameFinished(false);
-              setGameResults([]);
-              setUserDrawings([]);
-              setRoundResults([]);
-              setRoundActive(false);
-              setTimeLeft(0);
-              setWord('');
-              setRoundId(null);
-            }}
-            style={{ marginTop: 12 }}
-          >
-            Back to Lobby
-          </button>
-        </div>
-      )}
-
-      {roundResults.length > 0 && (
-        <div style={{ marginTop: 20 }}>
-          <h3>Round Results</h3>
-          {roundResults.map(entry => (
-            <div key={entry.id} style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10, marginBottom: 10 }}>
-              <strong>{entry.username || 'Unknown'}</strong>
-              <div>Score: {entry.ai_score ?? 0}/100</div>
-              <div>Feedback: {entry.ai_feedback || 'No feedback'}</div>
-              {entry.image_data ? <img src={entry.image_data} alt="drawing" style={{ width: '100%', marginTop: 8, borderRadius: 6 }} /> : null}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  function logout() {
+    if (socket.connected) socket.emit('leave-lobby');
+    localStorage.removeItem('token');
+    localStorage.removeItem('username');
+    navigate('/login', { replace: true });
+  }
 
   return (
-    <div style={{ maxWidth: 400, margin: '100px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <h1>Welcome, {username}</h1>
-      <button onClick={createLobby}>Create Lobby</button>
-      <hr />
-      <input placeholder="Lobby Code" value={joinCode} onChange={e => setJoinCode(e.target.value.toUpperCase())} />
-      <button onClick={joinLobby}>Join Lobby</button>
-      <hr />
-      <button onClick={logout}>Logout</button>
-    </div>
+    <main className="app-page">
+      <header className="page-header">
+        <div>
+          <p className="eyebrow">Die Zeichen-Herausforderung</p>
+          <h1>Sketchle</h1>
+        </div>
+        <div className="account-actions">
+          <span>Hallo, {username}</span>
+          <button className="text-button" onClick={logout}>Abmelden</button>
+        </div>
+      </header>
+
+      {error && <p className="error-message page-error" role="alert">{error}</p>}
+
+      {!inLobby ? (
+        <section className="panel lobby-entry">
+          <h2>Gemeinsam zeichnen</h2>
+          <p>Erstelle einen Spielraum und spiele mit 1 bis 10 Personen drei Zeichenrunden.</p>
+          <button className="primary-button" disabled={isLoading} onClick={createLobby}>
+            {isLoading ? 'Spielraum wird erstellt …' : 'Spielraum erstellen'}
+          </button>
+          <div className="divider"><span>oder</span></div>
+          <form className="join-form" onSubmit={joinLobby}>
+            <label htmlFor="lobby-code">Spielraum-Code</label>
+            <div className="join-controls">
+              <input
+                autoCapitalize="characters"
+                id="lobby-code"
+                maxLength={6}
+                onChange={event => setJoinCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                placeholder="6 Zeichen"
+                value={joinCode}
+              />
+              <button className="secondary-button" disabled={isLoading || joinCode.length !== 6} type="submit">
+                Beitreten
+              </button>
+            </div>
+          </form>
+        </section>
+      ) : (
+        <section className="panel game-panel">
+          <div className="lobby-heading">
+            <div>
+              <p className="eyebrow">Spielraum-Code</p>
+              <h2 className="lobby-code">{lobbyCode}</h2>
+            </div>
+            <span className={`status-pill ${lobbyStatus}`}>{lobbyStatus === 'waiting' ? 'Wartet auf den Start' : lobbyStatus === 'playing' ? 'Spiel läuft' : lobbyStatus === 'results' ? 'Auswertung' : 'Beendet'}</span>
+          </div>
+
+          <div className="players-heading">
+            <h3>Spieler</h3>
+            <span>{players.length} / {MAX_PLAYERS}</span>
+          </div>
+          <ul className="player-list">
+            {players.map(player => (
+              <li key={player}>
+                <span>{player}{player === hostUsername ? ' (Spielleitung)' : ''}{player === username ? ' (Du)' : ''}</span>
+                {roundActive && <span className={submissionStatus[player] ? 'submitted-tag' : 'waiting-tag'}>
+                  {submissionStatus[player] ? 'Abgegeben' : 'Zeichnet …'}
+                </span>}
+              </li>
+            ))}
+          </ul>
+
+          {lobbyStatus === 'waiting' && (
+            <div className="start-area">
+              {players.length < MIN_PLAYERS
+                ? <p>{players.length === 0 ? 'Du kannst das Spiel allein starten.' : `Noch ${MIN_PLAYERS - players.length} Spieler bis zum Start.`}</p>
+                : <p>Alle bereit? Die Spielleitung kann das Spiel starten.</p>}
+              {isHost && <button className="primary-button" disabled={players.length < MIN_PLAYERS} onClick={startRound}>Spiel starten</button>}
+              {!isHost && <p>Warte darauf, dass {hostUsername || 'die Spielleitung'} startet.</p>}
+            </div>
+          )}
+
+          {roundActive && (
+            <div className="round-area">
+              <div className="round-summary">
+                <div>
+                  <p className="eyebrow">Runde {currentRound} von 3</p>
+                  <h2>{word}</h2>
+                </div>
+                <div className={`timer ${timeLeft <= 10 ? 'timer-warning' : ''}`} aria-live="polite">{timeLeft} Sek.</div>
+              </div>
+              <DrawingCanvas
+                key={roundId}
+                disabled={hasSubmitted || !roundActive}
+                onSubmit={submitDrawing}
+                ref={canvasRef}
+              />
+              {hasSubmitted && <p className="success-message">Abgegeben – die anderen Spieler zeichnen noch.</p>}
+            </div>
+          )}
+
+          {!roundActive && roundResultsReceived && (
+            <section className="results-section">
+              <p className="eyebrow">Runde {currentRound} abgeschlossen</p>
+              <h2>Rundenauswertung</h2>
+              {lobbyStatus !== 'completed' && <p className="help-text">Die nächste Runde startet automatisch in wenigen Sekunden.</p>}
+              <div className="results-grid">
+                {roundResults.map((entry, index) => (
+                  <article className="result-card" key={entry.id}>
+                    <div className="result-title">
+                      <strong>#{index + 1} {entry.username}</strong>
+                      <span>{entry.ai_score === null ? '—' : `${entry.ai_score}/100`}</span>
+                    </div>
+                    <p>{entry.ai_feedback || 'Keine KI-Rückmeldung verfügbar.'}</p>
+                    {entry.image_data && <img alt={`${entry.username}s Zeichnung`} src={entry.image_data} />}
+                  </article>
+                ))}
+              </div>
+              {roundResults.length === 0 && <p>Noch keine Zeichnungen wurden abgegeben.</p>}
+            </section>
+          )}
+
+          {gameFinished && (
+            <section className="results-section">
+              <p className="eyebrow">Drei Runden abgeschlossen</p>
+              <h2>Spielergebnis</h2>
+              <ol className="leaderboard-list">
+                {gameResults.map(entry => (
+                  <li key={entry.id}>
+                    <span>#{entry.rank} {entry.username}</span>
+                    <strong>{entry.total_score} Punkte</strong>
+                  </li>
+                ))}
+              </ol>
+              <button className="primary-button" onClick={leaveLobby}>Zurück zur Spielraum-Auswahl</button>
+            </section>
+          )}
+
+          <button className="text-button leave-button" onClick={leaveLobby}>Spielraum verlassen</button>
+        </section>
+      )}
+    </main>
   );
 }
-

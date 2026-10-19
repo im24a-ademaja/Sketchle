@@ -1,11 +1,11 @@
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
   username VARCHAR(30) UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE TABLE lobbies (
+CREATE TABLE IF NOT EXISTS lobbies (
   id SERIAL PRIMARY KEY,
   code VARCHAR(6) UNIQUE NOT NULL,
   status VARCHAR(20) DEFAULT 'waiting',
@@ -14,7 +14,7 @@ CREATE TABLE lobbies (
   created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE TABLE rounds (
+CREATE TABLE IF NOT EXISTS rounds (
   id SERIAL PRIMARY KEY,
   lobby_id INT REFERENCES lobbies(id),
   round_number INT NOT NULL,
@@ -23,7 +23,7 @@ CREATE TABLE rounds (
   ended_at TIMESTAMP
 );
 
-CREATE TABLE drawings (
+CREATE TABLE IF NOT EXISTS drawings (
   id SERIAL PRIMARY KEY,
   round_id INT REFERENCES rounds(id),
   user_id INT REFERENCES users(id),
