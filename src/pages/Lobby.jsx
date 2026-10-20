@@ -173,10 +173,16 @@ export default function Lobby() {
   }, [roundActive, roundEndsAt]);
 
   useEffect(() => {
-    if (!roundActive || timeLeft !== 0 || hasSubmittedRef.current) return;
-    const imageData = canvasRef.current?.getImageData();
-    if (imageData) void submitDrawingRef.current(imageData);
-  }, [roundActive, timeLeft]);
+    if (!roundActive || !roundEndsAt) return undefined;
+    const scheduledRoundId = roundId;
+    const timeout = setTimeout(() => {
+      if (roundIdRef.current !== scheduledRoundId || hasSubmittedRef.current) return;
+      const imageData = canvasRef.current?.getImageData();
+      if (imageData) void submitDrawingRef.current(imageData);
+    }, Math.max(0, roundEndsAt - Date.now()));
+
+    return () => clearTimeout(timeout);
+  }, [roundActive, roundEndsAt, roundId]);
 
   async function joinSocketLobby(code) {
     if (!socket.connected) {

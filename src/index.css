@@ -1,15 +1,15 @@
 :root {
   font-family: Inter, 'Segoe UI', sans-serif;
-  color: #20242c;
-  background: #f4f5f7;
+  color: #510046;
+  background-image: linear-gradient(to bottom right, #ff9100, #ffff00);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  --ink: #20242c;
+  --ink: #001847;
   --muted: #6f7785;
   --border: #e4e7ec;
-  --accent: #5a55e7;
-  --accent-dark: #4640c9;
+  --accent: #940080;
+  --accent-dark: #940080;
   --surface: #fff;
 }
 
@@ -35,6 +35,12 @@ button {
 button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 3px solid rgb(148 0 128 / 35%);
+  outline-offset: 2px;
 }
 
 h1,
@@ -71,7 +77,7 @@ h3 {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 20px;
-  box-shadow: 0 12px 40px rgb(29 36 51 / 6%);
+  box-shadow: 0 14px 36px rgb(29 36 51 / 9%);
 }
 
 .auth-form,
@@ -116,12 +122,13 @@ h3 {
   background: #fff;
   color: var(--ink);
   outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
 .auth-form input:focus,
 .join-controls input:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgb(90 85 231 / 12%);
+  box-shadow: 0 0 0 3px rgb(148 0 128 / 12%);
 }
 
 .auth-form {
@@ -141,7 +148,7 @@ h3 {
   border: 0;
   border-radius: 10px;
   font-weight: 700;
-  transition: background 120ms ease, transform 120ms ease;
+  transition: background 120ms ease, box-shadow 120ms ease, transform 120ms ease;
 }
 
 .primary-button {
@@ -150,8 +157,9 @@ h3 {
 }
 
 .primary-button:hover:not(:disabled) {
-  background: var(--accent-dark);
+  background: #760067;
   transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgb(148 0 128 / 22%);
 }
 
 .secondary-button {
@@ -162,6 +170,7 @@ h3 {
 
 .secondary-button:hover:not(:disabled) {
   background: #f5f6f9;
+  transform: translateY(-1px);
 }
 
 .text-button {
@@ -220,7 +229,7 @@ h3 {
 }
 
 .account-actions {
-  color: #555d6b;
+  color: #fff;
   font-size: 14px;
 }
 
@@ -336,11 +345,11 @@ h3 {
 }
 
 .waiting-tag {
-  color: #9a6700;
+  color: #959595;
 }
 
 .submitted-tag {
-  color: #15803d;
+  color: #00ff5e;
 }
 
 .start-area {
@@ -385,7 +394,7 @@ h3 {
 
 .timer-warning {
   background: #fff0ed;
-  color: #c53030;
+  color: #ff0000;
 }
 
 .drawing-tools {
@@ -466,6 +475,8 @@ h3 {
   overflow: hidden;
   border: 1px solid #dfe2e8;
   border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 3px 12px rgb(29 36 51 / 8%);
   touch-action: none;
 }
 

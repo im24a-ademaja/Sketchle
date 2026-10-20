@@ -42,7 +42,21 @@ const pool = new Pool({
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const uploadsDir = path.resolve(__dirname, 'uploads');
-const WORDS = ['Katze', 'Haus', 'Sonne', 'Baum', 'Auto', 'Fisch', 'Berg', 'Buch', 'Telefon', 'Blume'];
+const WORDS = [
+  'Katze', 'Haus', 'Sonne', 'Baum', 'Auto', 'Fisch', 'Berg', 'Buch', 'Telefon', 'Blume',
+  'Fahrrad', 'Flugzeug', 'Schiff', 'Zug', 'Schlüssel', 'Regenschirm', 'Uhr', 'Brille',
+  'Schuh', 'Hut', 'Tasse', 'Gabel', 'Löffel', 'Pizza', 'Apfel', 'Banane', 'Erdbeere',
+  'Kuchen', 'Eis', 'Kamera', 'Gitarre', 'Klavier', 'Ball', 'Drachen', 'Kerze', 'Lampe',
+  'Stuhl', 'Tisch', 'Bett', 'Tür', 'Fenster', 'Krone', 'Geschenk', 'Rucksack', 'Koffer',
+  'Kaktus', 'Pilz', 'Regenbogen', 'Wolke', 'Mond', 'Stern', 'Schneemann', 'Schnecke',
+  'Schildkröte', 'Elefant', 'Pinguin', 'Schmetterling', 'Biene', 'Krabbe', 'Wal',
+  'Delfin', 'Leuchtturm', 'Rakete', 'Roboter', 'Ananas', 'Karotte', 'Zahnbürste',
+  'Briefkasten', 'Burg', 'Pyramide', 'Eule', 'Igel', 'Fuchs', 'Huhn', 'Kuh', 'Schlange',
+  'Pferd', 'Giraffe', 'Affe', 'Mütze', 'Schal', 'Handschuh', 'Zelt', 'Besen', 'Eimer',
+  'Schaufel', 'Schere', 'Kamm', 'Kissen', 'Spiegel', 'Vase', 'Blitz', 'Bergsee',
+  'Schneeflocke', 'Kirsche', 'Wassermelone', 'Kürbis', 'Maiskolben', 'Kronleuchter',
+  'U-Boot', 'Heißluftballon', 'Feuerwehrauto', 'Brief', 'Schatztruhe', 'Sandburg',
+];
 const liveLobbies = new Map();
 
 app.use(cors());
@@ -444,7 +458,16 @@ async function startRoundForLobby(lobbyCode) {
     const roundNumber = lobby.current_round + 1;
     if (roundNumber > MAX_ROUNDS) return;
 
-    const word = WORDS[Math.floor(Math.random() * WORDS.length)];
+    const usedWordsResult = await pool.query(
+      'SELECT word FROM rounds WHERE lobby_id = $1',
+      [lobby.id]
+    );
+    const usedWords = new Set(usedWordsResult.rows.map(({ word: usedWord }) => usedWord));
+    const availableWords = WORDS.filter(word => !usedWords.has(word));
+    if (availableWords.length === 0) {
+      throw new Error(`Keine unbenutzten Stichwörter mehr für Spielraum ${lobbyCode} verfügbar.`);
+    }
+    const word = availableWords[randomInt(availableWords.length)];
     const roundResult = await pool.query(
       'INSERT INTO rounds (lobby_id, round_number, word, started_at) VALUES ($1, $2, $3, NOW()) RETURNING *',
       [lobby.id, roundNumber, word]
